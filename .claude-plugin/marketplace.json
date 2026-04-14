@@ -1,0 +1,17 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "Phaen",
+  "description": "Pablo Kebees' Claude Code plugins",
+  "owner": {
+    "name": "Pablo Kebees",
+    "url": "https://github.com/Phaen"
+  },
+  "plugins": [
+    {
+      "name": "claude-solve",
+      "description": "Structured problem-solving with an explicit solution tree and real-time visualisation.",
+      "source": "./",
+      "category": "productivity"
+    }
+  ]
+}
