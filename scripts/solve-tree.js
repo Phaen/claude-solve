@@ -3,16 +3,15 @@
 //
 // Modes:
 //   init <session> <cwd> [start_line]  — initialise a fresh tree state file
-//   stop <session> <cwd>               — process transcript entries (stdin = Stop hook payload)
-//   tool <session> <cwd>               — same as stop, fired per PostToolUse for real-time updates
+//   tool <session> <cwd>               — advance state, never validate (PostToolUse)
+//   stop <session> <cwd>               — advance state + validate, processes last_assistant_message if present (PreToolUse / Stop)
 
 const fs   = require('fs');
 const path = require('path');
-const rl   = require('readline');
 
 const [,, mode, session, cwd, startLineArg] = process.argv;
 if (!mode || !session || !cwd) {
-  process.stderr.write(`Usage: solve-tree.js <init|stop|tool> <session_id> <cwd> [start_line]\n`);
+  process.stderr.write(`Usage: solve-tree.js <init|tool|stop> <session_id> <cwd> [start_line]\n`);
   process.exit(1);
 }
 
@@ -43,6 +42,37 @@ function problemNode(id, parentSolution = null) {
   return { type: 'problem', id, parent_solution: parentSolution, text: '' };
 }
 
+// ── Tree renderer ──────────────────────────────────────────────────────────────
+
+function renderTree(state) {
+  const solutions = Object.values(state.nodes)
+    .filter(n => n.type === 'solution')
+    .sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
+
+  if (!solutions.length) return '  (no solutions declared yet)';
+
+  return solutions.map(n => {
+    const depth  = (n.id.match(/\./g) || []).length;
+    const indent = '  '.repeat(depth + 1);
+    return `${indent}${n.id} [${n.status}]`;
+  }).join('\n');
+}
+
+function incompleteMessage(state, error) {
+  const open = Object.values(state.nodes)
+    .filter(n => n.type === 'solution' && n.status !== 'resolved' && n.status !== 'culled')
+    .sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }))
+    .map(n => `${n.id} (${n.status})`)
+    .join(', ');
+
+  const parts = [];
+  if (error) parts.push(error);
+  parts.push(`Open solutions: ${open || 'none declared'}.`);
+  parts.push(`\nCurrent tree:\n${renderTree(state)}`);
+  parts.push(`\nDeclare, investigate, and resolve or cull all remaining solutions.`);
+  return parts.join('\n');
+}
+
 // ── init ───────────────────────────────────────────────────────────────────────
 
 if (mode === 'init') {
@@ -64,7 +94,7 @@ if (mode === 'init') {
   process.exit(0);
 }
 
-// ── stop / tool (same logic) ───────────────────────────────────────────────────
+// ── tool / stop (shared processing) ──────────────────────────────────────────
 
 let rawPayload = '';
 process.stdin.on('data', d => rawPayload += d);
@@ -251,9 +281,8 @@ process.stdin.on('end', () => {
     state.last_processed_line = lines.length;
   }
 
-  // The final message is never in the transcript when the stop hook fires — process it from the payload.
-  // Store it so the next run can skip it when it appears in the transcript.
-  // Note: only Stop payloads carry last_assistant_message; PostToolUse payloads never do.
+  // stop mode only: the final message is never in the transcript when the Stop hook fires.
+  // Process it from the payload and store it so the next run can skip it.
   if (mode === 'stop' && payload.last_assistant_message) {
     processText(payload.last_assistant_message);
     state.pending_message = payload.last_assistant_message;
@@ -261,8 +290,8 @@ process.stdin.on('end', () => {
 
   // ── Validate ─────────────────────────────────────────────────────────────────
 
-  // In tool mode an open <investigate> is expected mid-turn — only validate at stop time.
-  if (container && mode !== 'tool') {
+  // Open container: only an error at stop time (mid-turn investigate is expected in tool mode).
+  if (container && mode === 'stop') {
     const idStr = container.id != null ? ` id="${container.id}"` : '';
     err(`You left <${container.type}${idStr}> open without a closing </${container.type}>. Close it before writing <resolved>, sub-problems, or other blocks.`);
   }
@@ -287,9 +316,18 @@ process.stdin.on('end', () => {
   save(state);
 
   if (errors.length) {
-    process.stdout.write(errors[0] + '\n');
+    process.stdout.write(incompleteMessage(state, errors[0]) + '\n');
     process.exit(1);
   }
 
-  process.stdout.write('OK\n');
+  if (state.status === 'solving' && mode === 'stop') {
+    process.stdout.write(incompleteMessage(state, null) + '\n');
+    process.exit(1);
+  }
+
+  if (state.status === 'resolved') {
+    process.stdout.write('RESOLVED\n');
+  }
+
+  process.exit(0);
 });

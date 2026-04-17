@@ -40,7 +40,7 @@ Before investigating, declare **all reasonable solutions you can think of** — 
 
 ### 2. Investigate
 
-Every `<investigate>` block must contain at least one tool call. Nothing else goes inside — no sub-problems, no verdicts.
+Every `<investigate>` block must contain at least one tool call, and may contain findings and notes. Sub-problems and outcome declarations must come *after* `</investigate>` closes — never inside it.
 
 ```
 <investigate id="N">

@@ -12,24 +12,10 @@ TREE_FILE="${PWD}/.claude/solve_tree_${SOLVE_ID}.json"
 [ ! -f "$TREE_FILE" ] && exit 0
 
 STATUS=$(jq -r '.status // ""' "$TREE_FILE" 2>/dev/null)
+[ "$STATUS" != "solving" ] && exit 0
 
-case "$STATUS" in
-  resolved)
-    exit 0
-    ;;
-  solving)
-    RESULT=$(echo "$INPUT" | node "${CLAUDE_PLUGIN_ROOT}/scripts/solve-tree.js" tool "$SOLVE_ID" "$PWD" 2>&1)
-    if [ $? -ne 0 ] || [ "$RESULT" != "OK" ]; then
-      printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"EDIT BLOCKED: %s"}}' "$RESULT"
-      exit 0
-    fi
-    NEW_STATUS=$(jq -r '.status // ""' "$TREE_FILE" 2>/dev/null)
-    if [ "$NEW_STATUS" = "solving" ]; then
-      printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"EDIT BLOCKED: Solve tree is incomplete. Continue working through the tree — declare, investigate, and resolve or cull all remaining solutions."}}'
-    fi
-    exit 0
-    ;;
-  *)
-    exit 0
-    ;;
-esac
+RESULT=$(echo "$INPUT" | node "${CLAUDE_PLUGIN_ROOT}/scripts/solve-tree.js" stop "$SOLVE_ID" "$PWD" 2>&1)
+if [ $? -ne 0 ]; then
+  jq -n --arg msg "EDIT BLOCKED: $RESULT" '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":$msg}}'
+fi
+exit 0
