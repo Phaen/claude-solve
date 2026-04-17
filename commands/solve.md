@@ -2,13 +2,22 @@
 
 Structured problem-solving with an explicit solution tree. Required before implementing any non-trivial fix. Self-invoked when a test, build, or tool failure occurs during implementation.
 
+**All tool calls must be inside `<research>` or `<investigate>` blocks.**
+
 ## Problem
 
 $ARGUMENTS
 
-If no arguments given, derive the problem from the current conversation context. Read relevant files before articulating it — do not assume.
+If no arguments given, derive the problem from the current conversation context.
+
+Start by researching — read every relevant file before articulating the problem.
 
 ```
+<research>
+[tool calls — Read, Grep, Glob, Bash]
+Findings.
+</research>
+
 <problem>
 What is failing or needs to change.
 Current behaviour vs expected behaviour.
@@ -36,7 +45,7 @@ Brief description of the approach.
 </solution>
 ```
 
-Before investigating, declare **all reasonable solutions you can think of** — even ones that seem unlikely. Every option deserves a slot. You will get the chance to cull weak ones after investigation, but a solution you never declared can never be selected.
+Before investigating, declare **all reasonable solutions you can think of** — even ones that seem unlikely. Every option deserves a slot. You will investigate each one in turn.
 
 ### 2. Investigate
 
@@ -53,21 +62,6 @@ Findings.
 
 Exactly two possibilities:
 
-**Blockers found → declare sub-problems and recurse:**
-
-```
-<problem id="N.M">
-Description of the blocker.
-</problem>
-```
-
-Apply the same loop for each sub-solution `N.M.1`, `N.M.2`, etc. Once all sub-problems under a solution are worked through, declare the verdict on the parent:
-
-- All sub-problems resolved → `<resolved id="N">`
-- Any sub-problem unsolvable → `<cull id="N"/>` — one fatal blocker is enough, stop there
-
-A sub-problem is unsolvable when investigation yields no viable solutions, or all proposed solutions were themselves culled.
-
 **No blockers found → resolve immediately:**
 
 ```
@@ -76,13 +70,42 @@ What was confirmed and how it works.
 </resolved>
 ```
 
-Every `<solution>` must end up as either `<cull>` or `<resolved>`.
+**Blocker found → declare a sub-problem and research it:**
+
+```
+<problem id="N.M">
+Description of the blocker.
+</problem>
+
+<research id="N.M">
+[tool calls — validate whether the blocker is real and whether there is a way around it]
+Findings.
+</research>
+```
+
+After `</research>` closes, either recurse into sub-solutions or block:
+
+- There is a way around it → declare sub-solutions `N.M.1`, `N.M.2`, … and apply the same loop
+- No way around it → `<blocked id="N.M">` with explanation; the parent solution fails
+
+```
+<blocked id="N.M">
+Why this sub-problem cannot be resolved. What makes it a hard blocker.
+</blocked>
+```
+
+Once all sub-problems under a solution are worked through:
+
+- All sub-problems resolved → `<resolved id="N">`
+- Any sub-problem blocked → the solution has already failed; move on
+
+Every `<solution>` must end up either `<resolved>` or with a `<blocked>` sub-problem.
 
 ---
 
 ## Select
 
-**All top-level solutions culled:**
+**All top-level solutions failed:**
 
 ```
 <blocked>

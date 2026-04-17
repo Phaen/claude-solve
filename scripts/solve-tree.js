@@ -17,7 +17,7 @@ if (!mode || !session || !cwd) {
 
 const treeFile = path.join(cwd, '.claude', `solve_tree_${session}.json`);
 
-const TAG_RE = /<(\/?)(problem|solution|investigate|resolved|selected|cull|blocked|compare)(\s[^>]*)?\s*\/?>/g;
+const TAG_RE = /<(\/?)(problem|solution|investigate|research|resolved|selected|blocked|compare)(\s[^>]*)?\s*\/?>/g;
 const ID_RE  = /\bid=["']?([\d.]+)["']?/;
 
 // ── State helpers ──────────────────────────────────────────────────────────────
@@ -39,10 +39,18 @@ function solutionNode(id, parentProblem = null) {
 }
 
 function problemNode(id, parentSolution = null) {
-  return { type: 'problem', id, parent_solution: parentSolution, text: '' };
+  return { type: 'problem', id, parent_solution: parentSolution,
+           text: '', status: 'pending', research_text: '', blocked_text: null };
 }
 
 // ── Tree renderer ──────────────────────────────────────────────────────────────
+
+function isSolutionSettled(sol, nodes) {
+  if (sol.status === 'resolved' || sol.status === 'failed') return true;
+  return Object.values(nodes).some(n =>
+    n.type === 'problem' && n.parent_solution === sol.id && n.status === 'blocked'
+  );
+}
 
 function renderTree(state) {
   const solutions = Object.values(state.nodes)
@@ -60,7 +68,7 @@ function renderTree(state) {
 
 function incompleteMessage(state, error) {
   const open = Object.values(state.nodes)
-    .filter(n => n.type === 'solution' && n.status !== 'resolved' && n.status !== 'culled')
+    .filter(n => n.type === 'solution' && !isSolutionSettled(n, state.nodes))
     .sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }))
     .map(n => `${n.id} (${n.status})`)
     .join(', ');
@@ -69,7 +77,7 @@ function incompleteMessage(state, error) {
   if (error) parts.push(error);
   parts.push(`Open solutions: ${open || 'none declared'}.`);
   parts.push(`\nCurrent tree:\n${renderTree(state)}`);
-  parts.push(`\nDeclare, investigate, and resolve or cull all remaining solutions.`);
+  parts.push(`\nDeclare, investigate, and resolve or block all remaining solutions.`);
   return parts.join('\n');
 }
 
@@ -82,6 +90,7 @@ if (mode === 'init') {
     status:               'solving',
     container:            null,
     root_problem:         '',
+    root_research:        '',
     nodes:                {},
     selected_id:          null,
     compare_text:         null,
@@ -118,6 +127,7 @@ process.stdin.on('end', () => {
     status:              persisted.status,
     container:           persisted.container,
     root_problem:        persisted.root_problem,
+    root_research:       persisted.root_research || '',
     nodes:               persisted.nodes,
     selected_id:         persisted.selected_id,
     compare_text:        persisted.compare_text,
@@ -145,7 +155,7 @@ process.stdin.on('end', () => {
       const attrs       = m[3] || '';
       const idMatch     = ID_RE.exec(attrs);
       const tid         = idMatch ? idMatch[1] : null;
-      const selfClosing = name === 'cull' || name === 'selected' || m[0].trimEnd().endsWith('/>');
+      const selfClosing = name === 'selected' || m[0].trimEnd().endsWith('/>');
 
       if (container) {
         const { type: ctype, id: cid } = container;
@@ -161,14 +171,29 @@ process.stdin.on('end', () => {
           } else if (ctype === 'investigate' && cid && nodes[cid]) {
             nodes[cid].investigate_text = content;
             nodes[cid].status = 'investigated';
+          } else if (ctype === 'research') {
+            if (cid && nodes[cid]) {
+              nodes[cid].research_text = content;
+              nodes[cid].status = 'researched';
+            } else if (cid == null) {
+              state.root_research = content;
+            }
           } else if (ctype === 'resolved' && cid && nodes[cid]) {
             nodes[cid].resolved_text = content;
             nodes[cid].status = 'resolved';
+          } else if (ctype === 'blocked') {
+            if (cid && nodes[cid]) {
+              nodes[cid].blocked_text = content;
+              nodes[cid].status = 'blocked';
+              // Propagate failure to parent solution
+              const parentSol = nodes[cid].parent_solution;
+              if (parentSol && nodes[parentSol]) nodes[parentSol].status = 'failed';
+            } else {
+              state.blocked_text = content;
+              state.status = 'blocked';
+            }
           } else if (ctype === 'compare') {
             state.compare_text = content;
-          } else if (ctype === 'blocked') {
-            state.blocked_text = content;
-            state.status = 'blocked';
           }
 
           container = null;
@@ -184,14 +209,7 @@ process.stdin.on('end', () => {
       if (slash) continue; // stray closing tag
 
       if (selfClosing) {
-        if (name === 'cull') {
-          if (!tid) continue;
-          const node = nodes[tid];
-          if (!node || node.type !== 'solution') { err(`<cull id="${tid}"/> targets unknown solution — dropped.`); continue; }
-          if (node.status === 'culled') continue; // already culled, idempotent
-          if (node.status !== 'investigated')    { err(`Solution ${tid} culled without being investigated — dropped.`); continue; }
-          node.status = 'culled';
-        } else if (name === 'selected' && tid) {
+        if (name === 'selected' && tid) {
           state.selected_id = tid;
         }
         continue;
@@ -218,23 +236,39 @@ process.stdin.on('end', () => {
         if (!tid) continue;
         const node = nodes[tid];
         if (!node || node.type !== 'solution') { err(`<investigate id="${tid}"> has no matching <solution> — dropped.`); continue; }
-        if (node.status !== 'pending')         continue; // already investigated/resolved/culled, skip silently
+        if (node.status !== 'pending')         continue; // already investigated/resolved/failed, skip silently
         node.status = 'investigating';
         container = { type: 'investigate', id: tid };
+
+      } else if (name === 'research') {
+        if (tid) {
+          const node = nodes[tid];
+          if (!node || node.type !== 'problem') { err(`<research id="${tid}"> has no matching <problem> — dropped.`); continue; }
+          node.status = 'researching';
+          container = { type: 'research', id: tid };
+        } else {
+          container = { type: 'research', id: null };
+        }
 
       } else if (name === 'resolved') {
         if (!tid) continue;
         const node = nodes[tid];
         if (!node || node.type !== 'solution') { err(`<resolved id="${tid}"> has no matching <solution> — dropped.`); continue; }
-        if (node.status === 'resolved' || node.status === 'culled') continue; // already settled, skip silently
+        if (node.status === 'resolved' || node.status === 'failed') continue; // already settled, skip silently
         if (node.status !== 'investigated')    { err(`Solution ${tid} resolved without being investigated — dropped.`); continue; }
         container = { type: 'resolved', id: tid };
 
+      } else if (name === 'blocked') {
+        if (tid) {
+          const node = nodes[tid];
+          if (!node || node.type !== 'problem') { err(`<blocked id="${tid}"> has no matching <problem> — dropped.`); continue; }
+          container = { type: 'blocked', id: tid };
+        } else {
+          container = { type: 'blocked', id: null };
+        }
+
       } else if (name === 'compare') {
         container = { type: 'compare', id: null };
-
-      } else if (name === 'blocked') {
-        container = { type: 'blocked', id: null };
 
       } else {
         continue;
@@ -300,7 +334,7 @@ process.stdin.on('end', () => {
 
   if (!errors.length && state.status === 'solving') {
     const solutions   = Object.values(nodes).filter(n => n.type === 'solution');
-    const allDone     = solutions.length > 0 && solutions.every(n => n.status === 'resolved' || n.status === 'culled');
+    const allDone     = solutions.length > 0 && solutions.every(n => isSolutionSettled(n, nodes));
     const topResolved = solutions.filter(n => n.status === 'resolved' && !n.id.includes('.'));
     const anyResolved = solutions.some(n => n.status === 'resolved');
 

@@ -1,7 +1,7 @@
 {
   "name": "claude-solve",
   "description": "Structured problem-solving with an explicit solution tree and real-time visualisation. Forces declaration of all solutions before investigation, gates file edits until the tree is complete, and shows a live tree UI at localhost:7337.",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "author": {
     "name": "Pablo Kebees",
     "url": "https://github.com/Phaen"

@@ -177,7 +177,7 @@ header .logo {
   padding: 28px 28px 48px;
 }
 
-.tree { display: flex; flex-direction: column; gap: 8px; max-width: 720px; }
+.tree { display: flex; flex-direction: column; gap: 8px; }
 
 /* ── Problem ── */
 .problem-block {
@@ -212,7 +212,7 @@ header .logo {
 .sol-card.investigating{ border-left: 3px solid var(--blue); }
 .sol-card.investigated { border-left: 3px solid color-mix(in srgb,var(--blue) 45%,transparent); }
 .sol-card.resolved     { border-left: 3px solid var(--green); }
-.sol-card.culled       { border-left: 3px solid var(--red); opacity: 0.45; }
+.sol-card.failed       { border-left: 3px solid var(--red); opacity: 0.45; }
 .sol-card.selected-sol { box-shadow: 0 0 0 1px color-mix(in srgb,var(--purple) 35%,transparent); border-color: color-mix(in srgb,var(--purple) 50%,transparent); }
 
 .sol-hdr {
@@ -221,7 +221,7 @@ header .logo {
 }
 .sol-id   { font-size: 10px; color: var(--sub); min-width: 20px; }
 .sol-txt  { flex: 1; }
-.sol-card.culled .sol-txt { text-decoration: line-through; color: var(--sub); }
+.sol-card.failed .sol-txt { text-decoration: line-through; color: var(--sub); }
 
 .sol-status {
   font-size: 10px; font-weight: 600;
@@ -231,7 +231,7 @@ header .logo {
 .sol-status.investigating{ color: var(--blue); }
 .sol-status.investigated { color: color-mix(in srgb,var(--blue) 55%,transparent); }
 .sol-status.resolved     { color: var(--green); }
-.sol-status.culled       { color: var(--red); }
+.sol-status.failed       { color: var(--red); }
 
 .blink { display:inline-block; width:5px; height:5px; border-radius:50%;
          background:var(--blue); margin-right:5px; vertical-align:middle;
@@ -337,7 +337,7 @@ function el(tag, cls, text) {
 
 function statusLabel(s) {
   return { pending:'pending', investigating:'investigating…',
-           investigated:'investigated', resolved:'resolved', culled:'culled' }[s] || s;
+           investigated:'investigated', resolved:'resolved', failed:'failed' }[s] || s;
 }
 
 function renderTabs(sessions) {
@@ -417,10 +417,23 @@ function renderSolution(node, selectedId, nodes) {
     const grp = el('div', 'sub-group');
     grp.append(el('div', 'sub-lbl', 'sub-problem ' + prob.id));
     if (prob.text) grp.append(renderProblem('problem ' + prob.id, prob.text, prob.id));
-    const subsols = Object.values(nodes)
-      .filter(n => n.type === 'solution' && n.parent_problem === prob.id)
-      .sort((a,b) => a.id.localeCompare(b.id, undefined, {numeric:true}));
-    subsols.forEach(s => grp.append(renderSolution(s, selectedId, nodes)));
+    if (prob.research_text) {
+      const rs = el('div', 'detail-sec');
+      rs.style.cssText = 'padding: 6px 0;';
+      rs.append(el('div', 'detail-lbl', 'research'), el('div', 'detail-txt', prob.research_text));
+      grp.append(rs);
+    }
+    if (prob.blocked_text) {
+      const bl = el('div', 'blocked-block');
+      bl.style.cssText = 'margin-top: 4px;';
+      bl.append(el('div', 'lbl', 'blocked'), el('div', 'txt', prob.blocked_text));
+      grp.append(bl);
+    } else {
+      const subsols = Object.values(nodes)
+        .filter(n => n.type === 'solution' && n.parent_problem === prob.id)
+        .sort((a,b) => a.id.localeCompare(b.id, undefined, {numeric:true}));
+      subsols.forEach(s => grp.append(renderSolution(s, selectedId, nodes)));
+    }
     card.append(grp);
   }
   return card;
