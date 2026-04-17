@@ -194,6 +194,12 @@ header .logo {
   text-transform: uppercase; color: var(--sky); margin-bottom: 4px;
 }
 .problem-block .txt { color: var(--text); white-space: pre-wrap; }
+.problem-research { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); }
+.research-lbl {
+  font-size: 10px; font-weight: 700; letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--sub); margin-bottom: 3px;
+}
+.research-txt { font-size: 12px; white-space: pre-wrap; color: color-mix(in srgb,var(--text) 65%,transparent); }
 
 /* ── Solution card ── */
 .sol-card {
@@ -365,10 +371,15 @@ function switchTo(id) {
   renderTree(s?.state || null);
 }
 
-function renderProblem(labelText, text, nodeId) {
+function renderProblem(labelText, text, nodeId, researchText) {
   const b = el('div', 'problem-block');
   b.id = 'prob-' + (nodeId || 'root');
   b.append(el('div', 'lbl', labelText), el('div', 'txt', text || '…'));
+  if (researchText) {
+    const rs = el('div', 'problem-research');
+    rs.append(el('div', 'research-lbl', 'research'), el('div', 'research-txt', researchText));
+    b.append(rs);
+  }
   return b;
 }
 
@@ -416,13 +427,7 @@ function renderSolution(node, selectedId, nodes) {
   for (const prob of subprobs) {
     const grp = el('div', 'sub-group');
     grp.append(el('div', 'sub-lbl', 'sub-problem ' + prob.id));
-    if (prob.text) grp.append(renderProblem('problem ' + prob.id, prob.text, prob.id));
-    if (prob.research_text) {
-      const rs = el('div', 'detail-sec');
-      rs.style.cssText = 'padding: 6px 0;';
-      rs.append(el('div', 'detail-lbl', 'research'), el('div', 'detail-txt', prob.research_text));
-      grp.append(rs);
-    }
+    if (prob.text) grp.append(renderProblem('problem ' + prob.id, prob.text, prob.id, prob.research_text));
     if (prob.blocked_text) {
       const bl = el('div', 'blocked-block');
       bl.style.cssText = 'margin-top: 4px;';
@@ -444,7 +449,7 @@ function renderTree(state) {
   if (!state) { treeEl.replaceChildren(el('p','empty','No state yet…')); return; }
 
   const nodes = state.nodes || {};
-  if (state.root_problem) frag.append(renderProblem('problem', state.root_problem, null));
+  if (state.root_problem) frag.append(renderProblem('problem', state.root_problem, null, state.root_research));
 
   Object.values(nodes)
     .filter(n => n.type === 'solution' && !n.parent_problem)
