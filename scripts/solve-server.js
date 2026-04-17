@@ -11,6 +11,11 @@ const DATA_DIR = process.argv[2] || path.join(os.homedir(), '.claude');
 const PORT     = parseInt(process.argv[3]) || 7337;
 const REGISTRY = path.join(DATA_DIR, 'solve_sessions.json');
 
+const VENDOR = path.join(__dirname, 'vendor');
+const markedJs     = fs.readFileSync(path.join(VENDOR, 'marked.min.js'),        'utf8');
+const hljsJs       = fs.readFileSync(path.join(VENDOR, 'hljs.min.js'),          'utf8');
+const catppuccinCss = fs.readFileSync(path.join(VENDOR, 'catppuccin-mocha.css'), 'utf8');
+
 // ── State ──────────────────────────────────────────────────────────────────────
 
 const listeners = new Set();
@@ -90,6 +95,15 @@ const HTML = `<!DOCTYPE html>
 <meta charset="UTF-8">
 <title>Solve</title>
 <style>
+${catppuccinCss}
+pre { margin: 6px 0; border-radius: 5px; overflow-x: auto; }
+pre code.hljs { border-radius: 5px; font-size: 11.5px; padding: 10px 14px; display: block; }
+:not(pre) > code { background: var(--overlay); color: #a6e3a1; padding: 1px 5px; border-radius: 3px; font-size: 0.92em; }
+.md p { margin: 0 0 6px; } .md p:last-child { margin: 0; }
+.md ul, .md ol { padding-left: 18px; margin: 4px 0; }
+.md li { margin: 1px 0; }
+.md strong { font-weight: 700; }
+.md em { font-style: italic; }
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 :root {
   --bg:      #0c0c10;
@@ -193,13 +207,16 @@ header .logo {
   font-size: 10px; font-weight: 700; letter-spacing: 0.1em;
   text-transform: uppercase; color: var(--sky); margin-bottom: 4px;
 }
-.problem-block .txt { color: var(--text); white-space: pre-wrap; }
-.problem-research { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); }
-.research-lbl {
+.problem-block .txt { color: var(--text); }
+.problem-section { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); }
+.problem-section .sec-lbl {
   font-size: 10px; font-weight: 700; letter-spacing: 0.08em;
-  text-transform: uppercase; color: var(--sub); margin-bottom: 3px;
+  text-transform: uppercase; margin-bottom: 3px;
 }
-.research-txt { font-size: 12px; white-space: pre-wrap; color: color-mix(in srgb,var(--text) 65%,transparent); }
+.problem-section.research .sec-lbl { color: var(--sub); }
+.problem-section.blocked  .sec-lbl { color: var(--red); }
+.problem-section .sec-txt { font-size: 12px; color: color-mix(in srgb,var(--text) 65%,transparent); }
+.problem-section.blocked  .sec-txt { color: color-mix(in srgb,var(--red) 80%,transparent); }
 
 /* ── Solution card ── */
 .sol-card {
@@ -268,7 +285,7 @@ header .logo {
   text-transform: uppercase; color: var(--sub);
 }
 .detail-txt {
-  font-size: 12px; white-space: pre-wrap;
+  font-size: 12px;
   color: color-mix(in srgb,var(--text) 75%,transparent);
 }
 
@@ -371,14 +388,25 @@ function switchTo(id) {
   renderTree(s?.state || null);
 }
 
-function renderProblem(labelText, text, nodeId, researchText) {
+function mdDiv(cls, text) {
+  const d = el('div', cls);
+  d.innerHTML = md(text);
+  return d;
+}
+
+function renderProblem(labelText, text, nodeId, researchText, blockedText) {
   const b = el('div', 'problem-block');
   b.id = 'prob-' + (nodeId || 'root');
-  b.append(el('div', 'lbl', labelText), el('div', 'txt', text || '…'));
+  b.append(el('div', 'lbl', labelText), mdDiv('txt', text || '…'));
   if (researchText) {
-    const rs = el('div', 'problem-research');
-    rs.append(el('div', 'research-lbl', 'research'), el('div', 'research-txt', researchText));
+    const rs = el('div', 'problem-section research');
+    rs.append(el('div', 'sec-lbl', 'research'), mdDiv('sec-txt', researchText));
     b.append(rs);
+  }
+  if (blockedText) {
+    const bl = el('div', 'problem-section blocked');
+    bl.append(el('div', 'sec-lbl', 'blocked'), mdDiv('sec-txt', blockedText));
+    b.append(bl);
   }
   return b;
 }
@@ -409,12 +437,12 @@ function renderSolution(node, selectedId, nodes) {
     const det = el('div', 'sol-detail');
     if (node.investigate_text) {
       const s = el('div', 'detail-sec');
-      s.append(el('div', 'detail-lbl', 'investigation'), el('div', 'detail-txt', node.investigate_text));
+      s.append(el('div', 'detail-lbl', 'investigation'), mdDiv('detail-txt', node.investigate_text));
       det.append(s);
     }
     if (node.resolved_text) {
       const s = el('div', 'detail-sec');
-      s.append(el('div', 'detail-lbl', 'resolution'), el('div', 'detail-txt', node.resolved_text));
+      s.append(el('div', 'detail-lbl', 'resolution'), mdDiv('detail-txt', node.resolved_text));
       det.append(s);
     }
     card.append(det);
@@ -426,14 +454,8 @@ function renderSolution(node, selectedId, nodes) {
     .sort((a,b) => a.id.localeCompare(b.id, undefined, {numeric:true}));
   for (const prob of subprobs) {
     const grp = el('div', 'sub-group');
-    grp.append(el('div', 'sub-lbl', 'sub-problem ' + prob.id));
-    if (prob.text) grp.append(renderProblem('problem ' + prob.id, prob.text, prob.id, prob.research_text));
-    if (prob.blocked_text) {
-      const bl = el('div', 'blocked-block');
-      bl.style.cssText = 'margin-top: 4px;';
-      bl.append(el('div', 'lbl', 'blocked'), el('div', 'txt', prob.blocked_text));
-      grp.append(bl);
-    } else {
+    grp.append(renderProblem('sub-problem ' + prob.id, prob.text, prob.id, prob.research_text, prob.blocked_text));
+    if (!prob.blocked_text) {
       const subsols = Object.values(nodes)
         .filter(n => n.type === 'solution' && n.parent_problem === prob.id)
         .sort((a,b) => a.id.localeCompare(b.id, undefined, {numeric:true}));
@@ -498,6 +520,24 @@ fetch('/state').then(r=>r.json()).then(update).catch(()=>{});
 const es = new EventSource('/events');
 es.onmessage = e => { try { update(JSON.parse(e.data)); } catch(_) {} };
 es.onerror   = () => setTimeout(() => location.reload(), 3000);
+</script>
+<script>${markedJs}</script>
+<script>${hljsJs}</script>
+<script>
+marked.use({
+  renderer: {
+    code({ text, lang }) {
+      const language = lang && hljs.getLanguage(lang) ? lang : 'plaintext';
+      return '<pre><code class="hljs language-' + language + '">' + hljs.highlight(text, { language }).value + '</code></pre>';
+    }
+  },
+  gfm: true,
+  breaks: false,
+});
+function md(text) {
+  if (!text) return '';
+  return '<div class="md">' + marked.parse(text) + '</div>';
+}
 </script>
 </body>
 </html>`;
