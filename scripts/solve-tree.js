@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// solve-update.js — incremental solve tree state manager.
+// solve-tree.js — incremental solve tree state manager.
 //
 // Modes:
 //   init <session> <cwd> [start_line]  — initialise a fresh tree state file
@@ -12,7 +12,7 @@ const rl   = require('readline');
 
 const [,, mode, session, cwd, startLineArg] = process.argv;
 if (!mode || !session || !cwd) {
-  process.stderr.write(`Usage: solve-update.js <init|stop|tool> <session_id> <cwd> [start_line]\n`);
+  process.stderr.write(`Usage: solve-tree.js <init|stop|tool> <session_id> <cwd> [start_line]\n`);
   process.exit(1);
 }
 
@@ -196,7 +196,7 @@ process.stdin.on('end', () => {
         if (!tid) continue;
         const node = nodes[tid];
         if (!node || node.type !== 'solution') { err(`<resolved id="${tid}"> has no matching <solution> — dropped.`); continue; }
-        if (node.status === 'resolved') continue; // already resolved, skip silently
+        if (node.status === 'resolved' || node.status === 'culled') continue; // already settled, skip silently
         if (node.status !== 'investigated')    { err(`Solution ${tid} resolved without being investigated — dropped.`); continue; }
         container = { type: 'resolved', id: tid };
 
@@ -253,14 +253,16 @@ process.stdin.on('end', () => {
 
   // The final message is never in the transcript when the stop hook fires — process it from the payload.
   // Store it so the next run can skip it when it appears in the transcript.
-  if (payload.last_assistant_message) {
+  // Note: only Stop payloads carry last_assistant_message; PostToolUse payloads never do.
+  if (mode === 'stop' && payload.last_assistant_message) {
     processText(payload.last_assistant_message);
     state.pending_message = payload.last_assistant_message;
   }
 
   // ── Validate ─────────────────────────────────────────────────────────────────
 
-  if (container) {
+  // In tool mode an open <investigate> is expected mid-turn — only validate at stop time.
+  if (container && mode !== 'tool') {
     const idStr = container.id != null ? ` id="${container.id}"` : '';
     err(`You left <${container.type}${idStr}> open without a closing </${container.type}>. Close it before writing <resolved>, sub-problems, or other blocks.`);
   }

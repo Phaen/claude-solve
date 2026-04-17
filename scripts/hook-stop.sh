@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# PostToolUse: parse transcript incrementally to advance solve tree state in real-time.
+# Stop hook: incremental solve tree validation.
+# No-ops if not in an active solve session.
 
 INPUT=$(cat)
 SESSION=$(echo "$INPUT" | jq -r '.session_id // ""' 2>/dev/null)
@@ -13,5 +14,14 @@ TREE_FILE="${PWD}/.claude/solve_tree_${SOLVE_ID}.json"
 STATUS=$(jq -r '.status // ""' "$TREE_FILE" 2>/dev/null)
 [ "$STATUS" != "solving" ] && exit 0
 
-echo "$INPUT" | node "${CLAUDE_PLUGIN_ROOT}/scripts/solve-update.js" tool "$SOLVE_ID" "$PWD" 2>/dev/null
-exit 0
+RESULT=$(echo "$INPUT" | node "${CLAUDE_PLUGIN_ROOT}/scripts/solve-tree.js" stop "$SOLVE_ID" "$PWD" 2>&1)
+if [ $? -ne 0 ] || [ "$RESULT" != "OK" ]; then
+  printf '{"decision":"block","reason":"SOLVE ERROR: %s"}' "$RESULT"
+  exit 0
+fi
+
+TREE_STATUS=$(jq -r '.status // ""' "$TREE_FILE" 2>/dev/null)
+if [ "$TREE_STATUS" = "solving" ]; then
+  echo '{"decision":"block","reason":"Solve tree is incomplete. Continue working through the tree — declare, investigate, and resolve or cull all remaining solutions."}'
+  exit 0
+fi

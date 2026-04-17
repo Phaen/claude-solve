@@ -18,12 +18,16 @@ case "$STATUS" in
     exit 0
     ;;
   solving)
-    echo "EDIT BLOCKED: Solve tree is not yet complete. Finish the tree first — the edit gate unlocks automatically when you stop with a valid, complete tree." >&2
-    exit 2
-    ;;
-  required)
-    echo "EDIT BLOCKED: A failure was detected during implementation. Run /solve on the new problem before making further changes." >&2
-    exit 2
+    RESULT=$(echo "$INPUT" | node "${CLAUDE_PLUGIN_ROOT}/scripts/solve-tree.js" tool "$SOLVE_ID" "$PWD" 2>&1)
+    if [ $? -ne 0 ] || [ "$RESULT" != "OK" ]; then
+      printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"EDIT BLOCKED: %s"}}' "$RESULT"
+      exit 0
+    fi
+    NEW_STATUS=$(jq -r '.status // ""' "$TREE_FILE" 2>/dev/null)
+    if [ "$NEW_STATUS" = "solving" ]; then
+      printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"EDIT BLOCKED: Solve tree is incomplete. Continue working through the tree — declare, investigate, and resolve or cull all remaining solutions."}}'
+    fi
+    exit 0
     ;;
   *)
     exit 0
